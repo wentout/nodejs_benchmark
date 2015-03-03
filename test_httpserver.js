@@ -4,34 +4,40 @@ var http = require('http');
 var count = 0;
 var max = 0;
 
+// requests per second -- therefore 1000 as a timeout
+var rpsTimeout = 0;
+
 var HTTPServerReqListener = function (req, res) {
 	count++;
 	( function (rq, rs) {
-
 		if (rq) {
-			setTimeout (function () {
-				rs.setHeader('Content-Type', 'text/html; charset=UTF-8');
-				rs.writeHead(200);
-				
-				var str = ['success : ' + count];
-				if (max < count) {
-					max = count;
-				}
-				str.push ('max : ' + max);
-				rs.end (str.join ('\n'));
+			rs.setHeader('Content-Type', 'text/html; charset=UTF-8');
+			rs.writeHead(200);
 
-				count--;
-			}, 3000);
+			if (rpsTimeout) {
+				setTimeout (function () {
+					var str = 'running [ ' + count;
+					if (max < count) {
+						max = count;
+					}
+					str += ' ] : max [ ' + max + ' ]';
+					rs.end (str);
+					count--;
+				}, rpsTimeout);
+			} else {
+				rs.end ('ok');
+			}
+			
 		} else {
 			rs.end ();
 		}
-
 	} (req, res) );
-
 };
 
 var server = http.createServer( HTTPServerReqListener );
 server.listen( 8000 );
+
+
 
 // console interrupt
 process.stdin.setEncoding('utf8');
@@ -41,7 +47,7 @@ process.stdin.resume();
 process.stdin.on('data', function (key) {
 
 	if (key == '\u0003') {
-		console.log ('Have a nice day!')
+		console.log ('Have a nice day!');
 		process.exit(1);
 	}
 
@@ -52,10 +58,8 @@ console.log ('Process PID is: ' + pid);
 
 var exec = require('child_process').exec;
 setTimeout (function () {
-	exec('taskset -pc 0 ' + pid //);
-		, function (error, stdout, stderr){
+	exec('taskset -pc 0 ' + pid, function (error, stdout, stderr){
 		console.log('taskset stdout: \n' + stdout);
-		// log('stderr: ' + stderr);
 		if (error !== null) {
 			console.log('exec error: ' + error);
 		}

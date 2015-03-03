@@ -1,145 +1,249 @@
 
+// how many workers to start
+var workersCount = 2000;
+// how many requests to do
+var maxReqestsCount = 1000000;
+// delay between requests for a worker
+var workerDelay = 1;
+// in Linux you coud use that option for running affinity index per this process
+// var useAffinityForCore = false;
+var useAffinityForCore = true;
+
+
+
 var http = require('http');
 
 http.maxSockets = 4096*4096;
 http.globalAgent.maxSockets = 4096*4096;
 
-var req = require ('request');
 
-var options = {
+// how many requests passed through the test at all
+var completedRequests = 0;
 
-	// my node.js
-	url: 'http://localhost:8000/',
-	// my nginx
-	// url: 'http://localhost/',
-	method: 'GET',
-	encoding: 'utf8',
+// current running workers requests count
+var runningRequestsCount = 0;
 
-	headers: {
-		"Pragma": "no-cache",
-		"Cache-Control": "no-cache",
-		"Connection": "keep-alive"
+var statusErrCount = 0;
+var reqErrCount = 0;
+
+// last milliseconds spent for request proceed
+var msCount = 0;
+
+// last moment when request completed
+var lastRequestCompletitionTime = 0;
+
+// how many circles workers done
+var runlevel = 0;
+var lastResponseInfo = '';
+
+
+var startedAt = 0;
+var lastStatInfoTime = 0;
+// statistics
+var stat = function() {
+	if (!stopped) {
+		var sec = Math.ceil( (Date.now() - startedAt) / 1000 );
+		console.log([
+			'Stat Data: ',
+			completedRequests + ' | ', runningRequestsCount + ' | ', runlevel,
+			' || RPS: ' + Math.ceil(completedRequests/sec)  + ' || ',
+			'serr: ' + statusErrCount + ' | ',
+			'rerr: ' + reqErrCount + ' | ',
+			lastResponseInfo 
+		].join(''));
 	}
-
 };
 
-var len = 10000;
 
-var count = 0;
-var scount = 0;
-var runlevel = 0;
-var lastrunlevel = 0;
-var mscount = 0;
 
-var last_response = '';
+// options for request.js, cause they are the same
+var options = {
+	// my test_httpserver.js url & port
+	method: 'GET',
+	port: 8000,
+	hostname: 'localhost',
+	path: '/',
+	// cause of a a bug
+	agent: false
+};
 
 var task = function (worker) {
-	count++;
 	
-	worker.req = req (options, function (e, res, body) {
-		count--;
-		scount++;
-		if (body) {
-			worker.run++;
-			if (runlevel < worker.run) {
-				runlevel = worker.run;
+	// when everything started
+	if (startedAt == 0) {
+		startedAt = Date.now();
+	}
+	
+	var body = '';
+	var status = 0;
+	worker.lastStart = Date.now();
+	runningRequestsCount++;
+	worker.req = http.request(options, function(res){
+		status = 0 + res.statusCode;
+		res.setEncoding('utf8');
+		res.on('data', function (chunk) {
+			body += chunk.toString();
+		});
+		res.on('end', function() {
+			
+			runningRequestsCount--;
+			completedRequests++;
+			
+			if (status == 200) {
 				
-				mscount = ( (new Date()).getTime() - lastrunlevel ) / 1000;
-
-				lastrunlevel = (new Date()).getTime();
-
+				worker.run++;
+				
+				if (runlevel < worker.run) {
+					runlevel = 0 + worker.run;
+				}
+				
+				var dn = 0 + Date.now();
+				msCount = dn - worker.lastStart;
+				
+				lastRequestCompletitionTime = 0 + dn;
+				lastResponseInfo = worker.name + ' : ' + body.slice (0, 20);
+				
+				// to show stat with 1 second interval
+				if ( lastRequestCompletitionTime - lastStatInfoTime > 999 ) {
+					lastStatInfoTime = 0 + lastRequestCompletitionTime;
+					stat();
+				}
+				
+			} else {
+				statusErrCount++;
 			}
-			last_response = worker.name + ' : ' + body.slice (0, 50);
-			// console.log ('worker [' + worker.name + '] ' + worker.run);
-			setTimeout ( function () {
-				scount--;
-				worker.task (worker);
-			}, 300);
-		}
-		worker.req = null;
+			if (maxReqestsCount > completedRequests) {
+				setTimeout (function () {
+					worker.task( worker );
+				}, workerDelay);
+			} else {
+				if (!stopped) {
+					fin();
+				}
+			}
+		});
 	});
+	worker.req.on('error', function(err){
+		if (!stopped) {
+			reqErrCount++;
+			console.log('error', err);
+			process.exit(0);
+		}
+	});
+	worker.req.end();
+	
 };
 
 
-var workers = [];
-for (var i = 0; i < len; i++) {
 
-	workers.push ( {
-		name: ['w_' + i],
-		task: task,
-		run: -1
-	} );
-
-}
-
-
-var run = function () {
-	for (var i = len - 1; i >= 0; i--){
+// starter
+var started = 0;
+var ztarted = 0;
+var base = workersCount/10;
+var start = function () {
+	var startDT = Date.now();
+	console.log ('\nRunning...\n');
+	for (var i = workersCount - 1; i >= 0; i--) {
+		
 		(function (num) {
+			
+			// approx calculation for timeout, becaue of a lot workers
+			var fnDT = Date.now() - startDT;
+			var tOut = base - fnDT;
+			if (tOut < 1) { tOut = 1; }
+			
+			// worker starter
 			var el = workers[num];
 			setTimeout (function () {
 				el.task (el);
-			}, 1000);
+				started++;
+				if ( started - ztarted  > 999 ) {
+					ztarted = 0 + started;
+					console.log('started: ', started);
+				}
+				if (started == workersCount) {
+					console.log('Started All: ', workersCount, '\n');
+				}
+			}, tOut);
+			
 		}(i));
 	}
-	setInterval (function () {
-		if (count > 0) {
-			var n = mscount ? parseInt (len/mscount, 10) : 0;
-			console.log ('Requests count: ' + count + ' | ' + scount + ' | ' + runlevel + ' | ' + mscount + ' | ' + n);
-			console.log ( last_response );
-		} else {
-			run ();
-		}
-	}, 3000);
+};
+
+
+
+
+var workers = [];
+for (var i = 0; i < workersCount; i++) {
+	workers.push ( {
+		// worker name
+		name: ['w_' + i],
+		// the task for worker to run
+		task: task,
+		// amount of worker was runned a task
+		run: -1,
+		lastStart: 0
+	} );
 }
+console.log ('\nAvailiable Workers Count:', workers.length, '\n');
 
-console.log (workers.length);
 
-// console interrupt
-process.stdin.setEncoding('utf8');
-process.stdin.setRawMode(true);
-process.stdin.resume();
 
-process.stdin.on('data', function (key) {
 
-	if (key == '\u0003') {
-		for (var i = 0; i < len; i++) {
+var stopped = false;
+var fin = function() {
+	
+		stopped = true;
+		// to stop everything on Ctrl + c
+		for (var i = 0; i < workersCount; i++) {
 			var el = workers[i];
-			if (el && el.req){
+			if (el && el.req) {
 				if (el.req.abort) {
 					el.req.abort();
 				}
 			}
 		}
-		console.log ('Have a nice day!')
+		
+		console.log ('Have a nice day!');
 		setTimeout (function () {
 			process.exit(1);
 		}, 1000);
 		setTimeout (function () {
 			process.exit(0);
 		}, 3000);
+};
 
+// console interrupt
+process.stdin.setEncoding('utf8');
+process.stdin.setRawMode(true);
+process.stdin.resume();
+process.stdin.on('data', function (key) {
+
+	if (key == '\u0003') {
+		fin();
 	} else {
-		if ( (count == 0) && (count < len) ) {
-			run ();
-			lastrunlevel = (new Date()).getTime();
+		// to run workers if nothing is running
+		if ( startedAt == 0 && workers.length == workersCount ) {
+			start();
 		}
 	}
 
 });
 
-
-var pid = process.pid;
-console.log ('Process PID is: ' + pid);
-
-var exec = require('child_process').exec;
-setTimeout (function () {
-	exec('taskset -pc 1 ' + pid //);
-		, function (error, stdout, stderr){
-		console.log('taskset stdout: \n' + stdout);
-		// log('stderr: ' + stderr);
-		if (error !== null) {
-			console.log('exec error: ' + error);
-		}
-	});
-}, 1000);
+if (useAffinityForCore) {
+	var pid = process.pid;
+	console.log ('Process PID is: ' + pid);
+	var exec = require('child_process').exec;
+	setTimeout (function () {
+		exec('taskset -pc 1 ' + pid , function (error, stdout, stderr){
+			console.log('taskset stdout: \n' + stdout);
+			if (error !== null) {
+				console.log('exec error: ' + error);
+			} else {
+				console.log('press any key to continue');
+			}
+		});
+	}, 1000);
+} else {
+	console.log('press any key to continue');
+}

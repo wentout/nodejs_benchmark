@@ -17,10 +17,6 @@ var rand_str = function (len) {
 
 
 var s = rand_str(1000);
-// for (var i = 0; i < 1; i++) {
-	// s = s + s;
-// }
-// console.log(s.length);
 
 var zs = [];
 var zx = {};
