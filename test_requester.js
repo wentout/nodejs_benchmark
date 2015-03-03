@@ -46,6 +46,7 @@ var stat = function() {
 		console.log([
 			'Stat Data: ',
 			completedRequests + ' | ', runningRequestsCount + ' | ', runlevel,
+			' || sec: ' + sec,
 			' || RPS: ' + Math.ceil(completedRequests/sec)  + ' || ',
 			'serr: ' + statusErrCount + ' | ',
 			'rerr: ' + reqErrCount + ' | ',
