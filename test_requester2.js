@@ -1,6 +1,6 @@
 
 // how many workers to start
-var workersCount = 2200;
+var workersCount = 2000;
 // how many requests to do
 var maxReqestsCount = 100000;
 // delay between requests for a worker
@@ -12,9 +12,12 @@ var useAffinityForCore = true;
 
 
 var http = require('http');
+var https = require('https');
 
 http.maxSockets = 4096*4096;
 http.globalAgent.maxSockets = 4096*4096;
+https.maxSockets = 4096*4096;
+https.globalAgent.maxSockets = 4096*4096;
 
 
 // how many requests passed through the test at all
@@ -56,11 +59,13 @@ var stat = function() {
 };
 
 
+
+// options for request.js, cause they are the same
 var options = {
 	// my test_httpserver.js url & port
 	method: 'GET',
-	port: 8000,
-	hostname: 'localhost',
+	port: 443,
+	hostname: 'google.com',
 	path: '/',
 	// cause of a a bug
 	agent: false
@@ -83,7 +88,7 @@ var task = function (worker) {
 	var status = 0;
 	worker.lastStart = Date.now();
 	runningRequestsCount++;
-	worker.req = http.request(options, function(res){
+	worker.req = https.request(options, function(res) {
 		status = 0 + res.statusCode;
 		res.setEncoding('utf8');
 		res.on('data', function (chunk) {
@@ -94,7 +99,7 @@ var task = function (worker) {
 			runningRequestsCount--;
 			completedRequests++;
 			
-			if (status == 200) {
+			// if (status == 200) {
 				
 				worker.run++;
 				
@@ -106,7 +111,7 @@ var task = function (worker) {
 				msCount = dn - worker.lastStart;
 				
 				lastRequestCompletitionTime = 0 + dn;
-				lastResponseInfo = worker.name + ' : ' + body.slice (0, 20);
+				lastResponseInfo = worker.name + ' : ' + body.slice (0, 16);
 				
 				// to show stat with 1 second interval
 				if ( lastRequestCompletitionTime - lastStatInfoTime > 999 ) {
@@ -114,9 +119,10 @@ var task = function (worker) {
 					stat();
 				}
 				
-			} else {
-				statusErrCount++;
-			}
+			// } else {
+			// 	// console.log('there', status, body)
+			// 	statusErrCount++;
+			// }
 			if (maxReqestsCount > completedRequests) {
 				restartWorker(worker);
 			} else {
@@ -239,7 +245,7 @@ if (useAffinityForCore) {
 	console.log ('Process PID is: ' + pid);
 	var exec = require('child_process').exec;
 	setTimeout (function () {
-		exec('taskset -pc 1 ' + pid , function (error, stdout, stderr){
+		exec('taskset -pc 3 ' + pid , function (error, stdout, stderr){
 			console.log('taskset stdout: \n' + stdout);
 			if (error !== null) {
 				console.log('exec error: ' + error);

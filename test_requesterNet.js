@@ -1,20 +1,17 @@
 
 // how many workers to start
-var workersCount = 2200;
+var workersCount = 2000;
 // how many requests to do
 var maxReqestsCount = 100000;
 // delay between requests for a worker
 var workerDelay = 1;
 // in Linux you coud use that option for running affinity index per this process
 // var useAffinityForCore = false;
-var useAffinityForCore = true;
+var useAffinityForCore = false;
 
 
 
-var http = require('http');
-
-http.maxSockets = 4096*4096;
-http.globalAgent.maxSockets = 4096*4096;
+// var http = require('http');
 
 
 // how many requests passed through the test at all
@@ -57,13 +54,10 @@ var stat = function() {
 
 
 var options = {
-	// my test_httpserver.js url & port
-	method: 'GET',
 	port: 8000,
-	hostname: 'localhost',
-	path: '/',
-	// cause of a a bug
-	agent: false
+	host: 'localhost',
+	localAddress: '0.0.0.0',
+	localPort: 0
 };
 
 var restartWorker = function(worker) {
@@ -83,58 +77,79 @@ var task = function (worker) {
 	var status = 0;
 	worker.lastStart = Date.now();
 	runningRequestsCount++;
-	worker.req = http.request(options, function(res){
-		status = 0 + res.statusCode;
-		res.setEncoding('utf8');
-		res.on('data', function (chunk) {
-			body += chunk.toString();
-		});
-		res.on('end', function() {
+	
+	var net = require('net');
+	
+	worker.req = net.connect(options, function() {
+	// worker.req = net.connect(options.port, '127.0.0.1', function() {
+	});
+	worker.req.on('connect', function (chunk) {
+		worker.req.write([
+			'GET / HTTP/1.1',
+			// 'Host localhost:8000',
+			'',
+			''
+		].join('\r\n'));
+	});
+	
+	worker.req.on('close', function () {
+	});
+	worker.req.on('data', function (chunk) {
+		body += chunk.toString();
+		worker.req.end();
+	});
+	
+	worker.req.on('end', function() {
+		
+		runningRequestsCount--;
+		completedRequests++;
+		
+		worker.req.destroy();
+		
+		var split = body.split(/\r\n/g);
+		body = '' + split[7];
+		
+		
+		// if (status == 200) {
+		if (split[0].indexOf(200) > -1) {
 			
-			runningRequestsCount--;
-			completedRequests++;
+			worker.run++;
 			
-			if (status == 200) {
-				
-				worker.run++;
-				
-				if (runlevel < worker.run) {
-					runlevel = 0 + worker.run;
-				}
-				
-				var dn = 0 + Date.now();
-				msCount = dn - worker.lastStart;
-				
-				lastRequestCompletitionTime = 0 + dn;
-				lastResponseInfo = worker.name + ' : ' + body.slice (0, 20);
-				
-				// to show stat with 1 second interval
-				if ( lastRequestCompletitionTime - lastStatInfoTime > 999 ) {
-					lastStatInfoTime = 0 + lastRequestCompletitionTime;
-					stat();
-				}
-				
-			} else {
-				statusErrCount++;
+			if (runlevel < worker.run) {
+				runlevel = 0 + worker.run;
 			}
-			if (maxReqestsCount > completedRequests) {
-				restartWorker(worker);
-			} else {
-				if (!stopped) {
-					fin();
-				}
+			
+			var dn = 0 + Date.now();
+			msCount = dn - worker.lastStart;
+			
+			lastRequestCompletitionTime = 0 + dn;
+			lastResponseInfo = worker.name + ' : ' + body.slice (0, 20);
+			
+			// to show stat with 1 second interval
+			if ( lastRequestCompletitionTime - lastStatInfoTime > 999 ) {
+				lastStatInfoTime = 0 + lastRequestCompletitionTime;
+				stat();
 			}
-		});
+			
+		} else {
+			statusErrCount++;
+		}
+		if (maxReqestsCount > completedRequests) {
+			restartWorker(worker);
+		} else {
+			if (!stopped) {
+				fin();
+			}
+		}
 	});
 	worker.req.on('error', function(err){
 		if (!stopped) {
 			reqErrCount++;
-			// console.log('error', err);
+			console.log('error', err.stack, err);
 			restartWorker(worker);
-			// process.exit(0);
+			process.exit(0);
 		}
 	});
-	worker.req.end();
 	
 };
 
@@ -239,7 +254,7 @@ if (useAffinityForCore) {
 	console.log ('Process PID is: ' + pid);
 	var exec = require('child_process').exec;
 	setTimeout (function () {
-		exec('taskset -pc 1 ' + pid , function (error, stdout, stderr){
+		exec('taskset -pc 2 ' + pid , function (error, stdout, stderr){
 			console.log('taskset stdout: \n' + stdout);
 			if (error !== null) {
 				console.log('exec error: ' + error);
